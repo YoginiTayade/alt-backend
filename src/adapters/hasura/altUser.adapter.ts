@@ -5,6 +5,8 @@ import { ResponseUserDto, UserDto } from "src/altUser/dto/alt-user.dto";
 import jwt_decode from "jwt-decode";
 import { UserSearchDto } from "src/user/dto/user-search.dto";
 import { ErrorResponse } from "src/error-response";
+import pgPromise from "pg-promise";
+
 import {
   getUserRole,
   getToken,
@@ -21,7 +23,7 @@ import { ALTUserUpdateDto } from "src/altUser/dto/alt-user-update.dto";
 export class ALTHasuraUserService {
   axios = require("axios");
 
-  constructor(private httpService: HttpService) { }
+  constructor(private httpService: HttpService) {}
 
   public async getUser(userId: string, request: any) {
     const decoded: any = jwt_decode(request.headers.authorization);
@@ -892,8 +894,9 @@ export class ALTHasuraUserService {
     const [firstName, lastName] = obj.name.split(" ");
 
     // Step 1: Extract initials
-    const initials = `${firstName[0].toLowerCase()}${lastName ? lastName[0].toLowerCase() : ""
-      }`;
+    const initials = `${firstName[0].toLowerCase()}${
+      lastName ? lastName[0].toLowerCase() : ""
+    }`;
 
     const dob = obj.dateOfBirth
       .trim()
@@ -1004,9 +1007,6 @@ export class ALTHasuraUserService {
   //     // const altUserRoles = userInfo["https://hasura.io/jwt/claims"]["x-hasura-allowed-roles"];
   //     // const username = userInfo.preferred_username;
 
-
-
-
   //     // Decode the token
   //     const decoded: any = jwt_decode(token);
   //     //Check if token has expired
@@ -1107,14 +1107,16 @@ export class ALTHasuraUserService {
   //   }
   // }
 
-
-
   async validateToken(request: any, res: any) {
     try {
       // Extract the Authorization header
       const authToken = request.headers.authorization;
       if (!authToken) {
-        return this.sendErrorResponse(res, 400, "Authorization header is missing");
+        return this.sendErrorResponse(
+          res,
+          400,
+          "Authorization header is missing"
+        );
       }
 
       // Ensure token starts with "Bearer "
@@ -1143,7 +1145,8 @@ export class ALTHasuraUserService {
       }
 
       // Extract user roles and username
-      const roles = decoded["https://hasura.io/jwt/claims"]["x-hasura-allowed-roles"];
+      const roles =
+        decoded["https://hasura.io/jwt/claims"]["x-hasura-allowed-roles"];
       const username = decoded.preferred_username;
 
       // Fetch user details from GraphQL
@@ -1155,18 +1158,17 @@ export class ALTHasuraUserService {
       // Fetch user points
       const userPoints = await this.getUserPoints(request, token);
 
-      console.log("userPoints", userPoints)
+      console.log("userPoints", userPoints);
 
       // Append points to user data if available
       if (userPoints) {
-        userData[0].points = userPoints.aggregate.sum.points
+        userData[0].points = userPoints.aggregate.sum.points;
       } else {
-        userData[0].points = 0
+        userData[0].points = 0;
       }
 
       // Send success response
       return this.sendSuccessResponse(res, 200, "Authenticated", userData);
-
     } catch (error) {
       console.error("Error validating token:", error.message);
       return this.sendErrorResponse(res, 400, "Invalid token");
@@ -1276,7 +1278,7 @@ export class ALTHasuraUserService {
 
     try {
       const response = await this.axios(config);
-      console.log("response", response.data)
+      console.log("response", response.data);
       return response.data.data.UserPoints_aggregate || {};
     } catch (error) {
       console.error("Error fetching user points:", error.message);
@@ -1293,7 +1295,12 @@ export class ALTHasuraUserService {
     });
   }
 
-  sendSuccessResponse(res: any, statusCode: number, message: string, data: any) {
+  sendSuccessResponse(
+    res: any,
+    statusCode: number,
+    message: string,
+    data: any
+  ) {
     return res.status(statusCode).send({
       success: true,
       status: "Authenticated",
@@ -1301,7 +1308,199 @@ export class ALTHasuraUserService {
       data,
     });
   }
+  public async deleteUser(request, userData) {
+    let client;
+    let telemetryClient;
+    let telemetryPool;
+    try {
+      /*
+      // Verify user token and systemAdmin role
+      const userToken = request.headers.authorization?.split(" ")[1];
+      if (!userToken) {
+        return {
+          success: false,
+          message: "Authorization token is required",
+        };
+      }
 
+      // Verify systemAdmin role
+      const decodedToken: any = jwt_decode(userToken);
+      const hasSystemAdminRole =
+        decodedToken?.resource_access?.["hasura-app"]?.roles?.includes(
+          "systemAdmin"
+        );
 
+      if (!hasSystemAdminRole) {
+        return {
+          success: false,
+          message: "Only system administrators can delete users",
+          status: 403,
+        };
+      }
 
+      // Get admin token for Keycloak
+      const adminTokenResponse = await this.axios({
+        method: "post",
+        url: `${process.env.ALTKEYCLOAKURL}realms/master/protocol/openid-connect/token`,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data: new URLSearchParams({
+          grant_type: "password",
+          client_id: "admin-cli",
+          username: process.env.KEYCLOAK_USERNAME,
+          password: process.env.KEYCLOAK_PASSWORD,
+        }).toString(),
+      });
+
+      const adminToken = adminTokenResponse.data.access_token;
+
+      // Get user ID from Keycloak
+      const searchUrl = `${process.env.ALTKEYCLOAKURL}admin/realms/hasura-app/users`;
+      const userSearchResponse = await this.axios({
+        method: "get",
+        url: searchUrl,
+        params: {
+          exact: true,
+          username: userData.username,
+        },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+
+      if (!userSearchResponse.data || userSearchResponse.data.length === 0) {
+        return {
+          success: false,
+          message: `User ${userData.username} not found in Keycloak`,
+        };
+      }
+      try {
+        const keycloakUserId = userSearchResponse.data[0].id;
+        console.log("Found Keycloak user ID:", keycloakUserId);
+
+        // Delete from database using direct PostgreSQL queries
+        const tables = [
+          "CourseProgressTracking",
+          "ModuleProgressTracking",
+          "LessonProgressTracking",
+          "LessonProgressAttemptTracking",
+          "GroupMembership",
+          "Students",
+          "Teachers",
+          "Users",
+        ];
+
+        // Delete from each table sequentially
+        for (const table of tables) {
+          const deleteQuery = {
+            query: `
+            mutation Delete${table} {
+              delete_${table}(where: {userId: {_eq: "${keycloakUserId}"}}) {
+                affected_rows
+              }
+            }
+          `,
+          };
+
+          console.log(`Deleting from ${table}...`);
+          const response = await this.axios({
+            method: "post",
+            url: process.env.HASURAURL,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${userToken}`,
+            },
+            data: deleteQuery,
+          });
+
+          if (response.data.errors) {
+            console.error(
+              `Failed to delete from ${table}:`,
+              response.data.errors
+            );
+            return {
+              success: false,
+              message: `Failed to delete from ${table}`,
+              error: response.data.errors,
+            };
+          }
+        }
+
+        // If database deletion successful, delete from Keycloak
+        await this.axios({
+          method: "delete",
+          url: `${searchUrl}/${keycloakUserId}`,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+        });
+        */
+
+      // let keycloakUserId = "f29c0973-7f8a-47a2-a1df-dc1080460ed6";
+      let pgp;
+      pgp = pgPromise();
+
+      // Encode the password to handle special characters
+      const encodedPassword = encodeURIComponent(
+        process.env.TELEMETRY_DB_PASSWORD
+      );
+
+      //Create connection URL with the correct host
+      const DATABASE_URL = `postgres://${process.env.TELEMETRY_DB_USER}:${encodedPassword}@alt-gla-dev.uniteframework.io:5435/template1?sslmode=require`;
+
+      console.log("Connection URL:", DATABASE_URL);
+
+      // Initialize the database
+      const db = pgp({
+        connectionString: DATABASE_URL,
+        ssl: {
+          rejectUnauthorized: false,
+        },
+      });
+
+      const keycloakUserId = "f29c0973-7f8a-47a2-a1df-dc1080460ed6"; // for testing
+
+      console.log("Deleting telemetry for user:", keycloakUserId);
+
+      const result = await db.result(
+        `
+        DELETE FROM djp_events 
+        WHERE message::jsonb -> 'actor' ->> 'id' = $1
+      `,
+        [keycloakUserId]
+      );
+
+      console.log(`Deleted ${result.rowCount} telemetry records`);
+
+      if (pgp) {
+        pgp.end();
+      }
+
+      return {
+        success: true,
+        message: `Successfully deleted telemetry data`,
+        details: {
+          userId: keycloakUserId,
+          telemetryRecordsDeleted: result.rowCount,
+        },
+      };
+    } catch (error) {
+      console.error("Error in deleteUser:", error);
+      return {
+        success: false,
+        message: "Failed to delete telemetry data",
+        error: error.message,
+        details: error,
+      };
+    } finally {
+      if (telemetryClient) {
+        telemetryClient.release();
+      }
+      // Close the pool
+      await telemetryPool.end();
+    }
+  }
 }

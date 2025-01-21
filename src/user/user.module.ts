@@ -5,6 +5,7 @@ import { UserAdapter } from "./useradapter";
 import { EsmwadModule } from "src/adapters/esamwad/esamwad.module";
 import { SunbirdModule } from "src/adapters/sunbirdrc/subnbird.module";
 import { HasuraModule } from "src/adapters/hasura/hasura.module";
+import { ALTHasuraUserService } from "src/adapters/hasura/altUser.adapter";
 const ttl = process.env.TTL as never;
 @Module({
   imports: [
@@ -17,6 +18,6 @@ const ttl = process.env.TTL as never;
     }),
   ],
   controllers: [UserController],
-  providers: [UserAdapter],
+  providers: [UserAdapter,ALTHasuraUserService],
 })
 export class UserModule {}
