@@ -695,7 +695,7 @@ export class HasuraGroupService implements IServicelocatorgroup {
     request: any,
     schoolUdise: string,
     //className: string,
-    year: string
+    year: any
   ) {
 
     console.log("schoolUdise", schoolUdise)
@@ -705,10 +705,10 @@ export class HasuraGroupService implements IServicelocatorgroup {
     const altUserRoles =
       decoded["https://hasura.io/jwt/claims"]["x-hasura-allowed-roles"];
     const groupDetails = {
-      query: `query GetGroupList($board:String,$medium:String,$schoolUdise:String,$year:numeric) {
+      query: `query GetGroupList($board:String,$medium:String,$schoolUdise:String,$year:[numeric]) {
         Group(where: 
         {
-          academicYear: {_eq: $year}
+          academicYear: {_in: $year}
           status: {_eq: true}
           
           schoolUdise: {_eq: $schoolUdise}
